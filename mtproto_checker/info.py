@@ -7,7 +7,8 @@ import urllib.request
 from dataclasses import asdict
 from typing import Any
 
-from .checker import ProxyTarget, _decode_secret, _secret_key, _secret_mode, _secret_sni, parse_proxy_url
+from .models import ProxyTarget
+from .parser import _decode_secret, _secret_key, _secret_mode, _secret_sni, parse_proxy_url
 
 
 def collect_proxy_info(
@@ -132,12 +133,40 @@ def _sponsor_info(target: ProxyTarget) -> dict[str, Any]:
     return {
         "detected": detected,
         "confidence": confidence,
+        "source": "passive_url_secret_analysis",
+        "exact": _exact_sponsor_capability(),
         "explicit_fields": explicit,
         "secret_domain_hint": domain,
         "evidence": evidence,
         "note": (
             "Telegram MTProxy sponsor channel is not reliably encoded in public proxy URLs. "
-            "Without a Telegram API session, this is a passive heuristic, not proof."
+            "Without a Telegram user session this is a passive heuristic, not proof."
+        ),
+    }
+
+
+def _exact_sponsor_capability() -> dict[str, Any]:
+    return {
+        "available_without_telegram_user_session": False,
+        "can_tell_presence_without_telegram_user_session": False,
+        "telegram_methods": [
+            {
+                "name": "help.getPromoData",
+                "current": True,
+                "result": "help.promoData with proxy+peer flags when an MTProxy sponsor exists",
+                "limitation": "official schema marks the method as user-only",
+            },
+            {
+                "name": "help.getProxyData",
+                "current": False,
+                "result": "legacy help.proxyDataPromo/help.proxyDataEmpty",
+                "limitation": "legacy API layer, still depends on Telegram knowing the proxy context",
+            },
+        ],
+        "reason": (
+            "The promoted peer is resolved by Telegram servers for a client session connected "
+            "through a registered MTProxy. The proxy URL/secret only gives server, port, key, "
+            "and optional FakeTLS domain; it does not carry the sponsored channel ID."
         ),
     }
 

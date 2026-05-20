@@ -1,5 +1,6 @@
 import unittest
 
+from mtproto_checker.info import collect_proxy_info
 from mtproto_checker import ProxyStatus, parse_proxy_url
 
 
@@ -36,6 +37,19 @@ class ParseProxyUrlTests(unittest.TestCase):
 
     def test_status_values_are_strings(self):
         self.assertEqual(ProxyStatus.LIVE.value, "live")
+
+    def test_info_decodes_fake_tls_secret_and_marks_exact_sponsor_unavailable(self):
+        info = collect_proxy_info(
+            "tg://proxy?server=109.120.191.135&port=853&secret=7t16ej1vTPH3w_rpz_KLc3lhZHMueDUucnU",
+            include_ipwhois=False,
+        )
+
+        self.assertEqual(info["secret"]["mode"], "fake_tls")
+        self.assertEqual(info["secret"]["domain"], "ads.x5.ru")
+        self.assertTrue(info["sponsor"]["detected"])
+        self.assertFalse(
+            info["sponsor"]["exact"]["available_without_telegram_user_session"]
+        )
 
 
 if __name__ == "__main__":
