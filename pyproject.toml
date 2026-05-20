@@ -1,0 +1,16 @@
+[project]
+name = "telegram-proxy-checker"
+version = "0.1.0"
+description = "Fast async checker for Telegram MTProto proxy links and host:port targets."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Telegram Proxy Checker contributors" }]
+dependencies = ["pycryptodome>=3.23.0"]
+
+[project.scripts]
+telegram-proxy-checker = "proxy_checker:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
