@@ -19,6 +19,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 DEFAULT_TIMEOUT = 12.0
 DEFAULT_CONCURRENCY = 10
+DEFAULT_ATTEMPTS = 2
+DEFAULT_MIN_SUCCESSES = 1
 TELEGRAM_DC_HOST = "149.154.167.50"
 TELEGRAM_DC_PORT = 443
 TELEGRAM_DCS = (
@@ -62,6 +64,8 @@ class CheckResult:
     status: ProxyStatus
     latency_ms: float | None
     error: str | None = None
+    attempts: int = 1
+    successes: int = 0
 
     @property
     def alive(self) -> bool:
@@ -119,7 +123,12 @@ def parse_proxy_url(proxy_url: str) -> ProxyTarget:
     )
 
 
-async def check_proxy(proxy_url: str, timeout: float = DEFAULT_TIMEOUT) -> CheckResult:
+async def check_proxy(
+    proxy_url: str,
+    timeout: float = DEFAULT_TIMEOUT,
+    attempts: int = DEFAULT_ATTEMPTS,
+    min_successes: int = DEFAULT_MIN_SUCCESSES,
+) -> CheckResult:
     try:
         target = parse_proxy_url(proxy_url)
     except ValueError as exc:
@@ -130,35 +139,72 @@ async def check_proxy(proxy_url: str, timeout: float = DEFAULT_TIMEOUT) -> Check
             status=ProxyStatus.INVALID,
             latency_ms=None,
             error=str(exc),
+            attempts=0,
+            successes=0,
         )
 
     started = time.perf_counter()
+    attempts = max(1, attempts)
+    min_successes = max(1, min(min_successes, attempts))
+    successes = 0
+    last_error: str | None = None
+    successful_latency_ms: float | None = None
+
+    for attempt_index in range(attempts):
+        attempt_started = time.perf_counter()
+        try:
+            await _check_target_once(target, timeout)
+            successes += 1
+            successful_latency_ms = (time.perf_counter() - attempt_started) * 1000
+            if successes >= min_successes:
+                return CheckResult(
+                    url=target.raw_url,
+                    server=target.server,
+                    port=target.port,
+                    status=ProxyStatus.LIVE,
+                    latency_ms=round(successful_latency_ms, 1),
+                    error=None,
+                    attempts=attempt_index + 1,
+                    successes=successes,
+                )
+        except (OSError, EOFError, asyncio.TimeoutError, ConnectionError) as exc:
+            last_error = type(exc).__name__
+        except (RuntimeError, ValueError) as exc:
+            return CheckResult(
+                url=target.raw_url,
+                server=target.server,
+                port=target.port,
+                status=ProxyStatus.INVALID,
+                latency_ms=None,
+                error=str(exc),
+                attempts=attempt_index + 1,
+                successes=successes,
+            )
+
+    latency_ms = (time.perf_counter() - started) * 1000
+    return CheckResult(
+        url=target.raw_url,
+        server=target.server,
+        port=target.port,
+        status=ProxyStatus.DEAD,
+        latency_ms=round(latency_ms, 1),
+        error=last_error or "not enough successful attempts",
+        attempts=attempts,
+        successes=successes,
+    )
+
+
+async def _check_target_once(target: ProxyTarget, timeout: float) -> None:
     writer: asyncio.StreamWriter | None = None
 
     try:
         if target.kind == "socks5":
             await _check_socks5_target(target, timeout)
-            latency_ms = (time.perf_counter() - started) * 1000
-            return CheckResult(
-                url=target.raw_url,
-                server=target.server,
-                port=target.port,
-                status=ProxyStatus.LIVE,
-                latency_ms=round(latency_ms, 1),
-                error="SOCKS5 Telegram req_pq_multi accepted",
-            )
+            return
 
         if target.kind == "mtproto":
             await _check_mtproto_target(target, timeout)
-            latency_ms = (time.perf_counter() - started) * 1000
-            return CheckResult(
-                url=target.raw_url,
-                server=target.server,
-                port=target.port,
-                status=ProxyStatus.LIVE,
-                latency_ms=round(latency_ms, 1),
-                error="MTProto req_pq_multi accepted",
-            )
+            return
 
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(target.server, target.port),
@@ -166,37 +212,6 @@ async def check_proxy(proxy_url: str, timeout: float = DEFAULT_TIMEOUT) -> Check
         )
 
         await _check_tcp(reader, writer, timeout)
-        status = ProxyStatus.LIVE
-        error = "TCP probe accepted"
-
-        latency_ms = (time.perf_counter() - started) * 1000
-        return CheckResult(
-            url=target.raw_url,
-            server=target.server,
-            port=target.port,
-            status=status,
-            latency_ms=round(latency_ms, 1),
-            error=error,
-        )
-    except (OSError, EOFError, asyncio.TimeoutError, ConnectionError) as exc:
-        latency_ms = (time.perf_counter() - started) * 1000
-        return CheckResult(
-            url=target.raw_url,
-            server=target.server,
-            port=target.port,
-            status=ProxyStatus.DEAD,
-            latency_ms=round(latency_ms, 1),
-            error=type(exc).__name__,
-        )
-    except (RuntimeError, ValueError) as exc:
-        return CheckResult(
-            url=target.raw_url,
-            server=target.server,
-            port=target.port,
-            status=ProxyStatus.INVALID,
-            latency_ms=None,
-            error=str(exc),
-        )
     finally:
         if writer is not None:
             writer.close()
@@ -1149,12 +1164,19 @@ async def check_many(
     proxy_urls: Iterable[str],
     timeout: float = DEFAULT_TIMEOUT,
     concurrency: int = DEFAULT_CONCURRENCY,
+    attempts: int = DEFAULT_ATTEMPTS,
+    min_successes: int = DEFAULT_MIN_SUCCESSES,
 ) -> list[CheckResult]:
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
     async def run_one(proxy_url: str) -> CheckResult:
         async with semaphore:
-            return await check_proxy(proxy_url, timeout=timeout)
+            return await check_proxy(
+                proxy_url,
+                timeout=timeout,
+                attempts=attempts,
+                min_successes=min_successes,
+            )
 
     tasks = [run_one(proxy_url) for proxy_url in proxy_urls if proxy_url.strip()]
     if not tasks:
@@ -1177,15 +1199,19 @@ def read_proxy_urls(paths: list[Path], inline_urls: list[str]) -> list[str]:
 
 
 def print_human_result(result: CheckResult) -> None:
+    attempt_suffix = ""
+    if result.attempts > 1 or result.successes > 1:
+        attempt_suffix = f" ({result.successes}/{result.attempts})"
+
     if result.status == ProxyStatus.LIVE:
-        print(f"[LIVE] {result.server}:{result.port} {result.latency_ms:.1f} ms")
+        print(f"[LIVE] {result.server}:{result.port} {result.latency_ms:.1f} ms{attempt_suffix}")
         return
 
     if result.status == ProxyStatus.INVALID:
         print(f"[INVALID] {result.url} ({result.error})")
         return
 
-    print(f"[DEAD] {result.server}:{result.port} ({result.error})")
+    print(f"[DEAD] {result.server}:{result.port} ({result.error}){attempt_suffix}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1215,6 +1241,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_CONCURRENCY,
         help=f"Maximum concurrent checks. Default: {DEFAULT_CONCURRENCY}.",
     )
+    parser.add_argument(
+        "-a",
+        "--attempts",
+        type=int,
+        default=DEFAULT_ATTEMPTS,
+        help=f"Probe attempts per proxy. Default: {DEFAULT_ATTEMPTS}.",
+    )
+    parser.add_argument(
+        "--min-successes",
+        type=int,
+        default=DEFAULT_MIN_SUCCESSES,
+        help=f"Successful attempts required to mark LIVE. Default: {DEFAULT_MIN_SUCCESSES}.",
+    )
     parser.add_argument("--json", action="store_true", help="Print results as JSON.")
     parser.add_argument(
         "--alive-only",
@@ -1236,6 +1275,8 @@ async def async_main(argv: list[str] | None = None) -> int:
         urls,
         timeout=args.timeout,
         concurrency=args.concurrency,
+        attempts=args.attempts,
+        min_successes=args.min_successes,
     )
 
     if args.json:

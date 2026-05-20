@@ -18,6 +18,7 @@
 - поддержка ссылок `https://t.me/socks?server=...&port=...&user=...&pass=...`;
 - поддержка простого формата `host:port`;
 - чтение прокси из текстовых файлов;
+- повторные probe-попытки и consensus-режим через `--attempts` / `--min-successes`;
 - вывод в обычном виде или JSON;
 - простой вывод: `LIVE`, `DEAD` или `INVALID`.
 
@@ -48,6 +49,12 @@ python proxy_checker.py --file proxies.txt
 
 ```bash
 python proxy_checker.py --file proxies.txt --concurrency 10 --timeout 12
+```
+
+Более строгая проверка для флапающих прокси:
+
+```bash
+python proxy_checker.py --file proxies.txt --attempts 2 --min-successes 2
 ```
 
 Показать только живые:
