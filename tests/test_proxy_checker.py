@@ -1,6 +1,6 @@
 import unittest
 
-from proxy_checker import ProxyStatus, parse_proxy_url
+from mtproto_checker import ProxyStatus, parse_proxy_url
 
 
 class ParseProxyUrlTests(unittest.TestCase):

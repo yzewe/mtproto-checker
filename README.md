@@ -19,6 +19,7 @@
 - поддержка простого формата `host:port`;
 - чтение прокси из текстовых файлов;
 - повторные probe-попытки и consensus-режим через `--attempts` / `--min-successes`;
+- подробная информация через `--info`: режим secret, домен из secret, sponsor heuristic и ipwho.is;
 - вывод в обычном виде или JSON;
 - простой вывод: `LIVE`, `DEAD` или `INVALID`.
 
@@ -67,6 +68,13 @@ JSON:
 
 ```bash
 python proxy_checker.py --file proxies.txt --json
+```
+
+Полная информация по прокси:
+
+```bash
+python proxy_checker.py --file proxies.txt --info
+python proxy_checker.py --file proxies.txt --info --json
 ```
 
 ## Формат списка

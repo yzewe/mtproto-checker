@@ -9,7 +9,7 @@ authors = [{ name = "Telegram Proxy Checker contributors" }]
 dependencies = ["pycryptodome>=3.23.0"]
 
 [project.scripts]
-telegram-proxy-checker = "proxy_checker:main"
+telegram-proxy-checker = "mtproto_checker.checker:main"
 
 [tool.ruff]
 line-length = 100
