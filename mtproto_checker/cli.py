@@ -31,7 +31,11 @@ def print_human_result(result: CheckResult) -> None:
         attempt_suffix = f" ({result.successes}/{result.attempts})"
 
     if result.status == ProxyStatus.LIVE:
-        print(f"[LIVE] {result.server}:{result.port} {result.latency_ms:.1f} ms{attempt_suffix}")
+        probe_suffix = f" via {result.probe}" if result.probe else ""
+        print(
+            f"[LIVE] {result.server}:{result.port} "
+            f"{result.latency_ms:.1f} ms{probe_suffix}{attempt_suffix}"
+        )
         return
 
     if result.status == ProxyStatus.INVALID:
@@ -85,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--info",
         action="store_true",
-        help="Include proxy metadata: secret mode/domain, sponsor hints, and ipwho.is data.",
+        help="Include proxy metadata: secret mode/domain and ipwho.is data.",
     )
     parser.add_argument(
         "--no-ipwhois",
@@ -168,28 +172,11 @@ def print_human_info(info: dict) -> None:
         return
 
     secret = info.get("secret") or {}
-    sponsor = info.get("sponsor") or {}
     ipwhois = info.get("ipwhois") or {}
 
     mode = secret.get("mode") or "none"
     domain = secret.get("domain") or secret.get("embedded_text") or "-"
     print(f"  secret: mode={mode}, domain={domain}")
-
-    sponsor_state = sponsor.get("detected")
-    if sponsor_state is True:
-        label = f"likely yes ({sponsor.get('confidence')})"
-    elif sponsor_state is False:
-        label = f"likely no ({sponsor.get('confidence')})"
-    else:
-        label = "unknown"
-    print(f"  sponsor: {label}")
-    for evidence in sponsor.get("evidence") or []:
-        print(f"    - {evidence}")
-    exact = sponsor.get("exact") or {}
-    if exact:
-        can_tell = exact.get("can_tell_presence_without_telegram_user_session")
-        if can_tell is False:
-            print("    - exact sponsor/presence needs Telegram user-session RPC")
 
     if ipwhois:
         if ipwhois.get("ok"):

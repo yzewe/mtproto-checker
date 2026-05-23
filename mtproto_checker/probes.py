@@ -23,18 +23,16 @@ from .models import ProxyTarget
 from .parser import _decode_secret, _secret_key, _secret_mode, _secret_sni
 
 
-async def _check_target_once(target: ProxyTarget, timeout: float) -> None:
+async def _check_target_once(target: ProxyTarget, timeout: float) -> str:
     writer: asyncio.StreamWriter | None = None
 
     try:
         if target.kind == "socks5":
-            await _check_socks5_target(target, timeout)
-            return
+            return await _check_socks5_target(target, timeout)
 
         if target.kind == "mtproto":
             _ensure_crypto_available()
-            await _check_mtproto_target(target, timeout)
-            return
+            return await _check_mtproto_target(target, timeout)
 
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(target.server, target.port),
@@ -42,6 +40,7 @@ async def _check_target_once(target: ProxyTarget, timeout: float) -> None:
         )
 
         await _check_tcp(reader, writer, timeout)
+        return "tcp"
     finally:
         if writer is not None:
             writer.close()
@@ -551,13 +550,12 @@ async def _check_mtproto(
     await _check_obfuscated_mtproto(reader, writer, secret, timeout)
 
 
-async def _check_mtproto_target(target: ProxyTarget, timeout: float) -> None:
+async def _check_mtproto_target(target: ProxyTarget, timeout: float) -> str:
     secret = _decode_secret(target.secret)
     mode = _secret_mode(secret)
 
     if mode == "fake_tls":
-        await _check_fake_tls_mtproto_target(target, secret, timeout)
-        return
+        return await _check_fake_tls_mtproto_target(target, secret, timeout)
 
     errors: list[str] = []
     transport_candidates = [
@@ -592,7 +590,7 @@ async def _check_mtproto_target(target: ProxyTarget, timeout: float) -> None:
                     encoder=encoder,
                     decoder=decoder,
                 )
-                return
+                return f"mtproto dc{dc_id}/{transport_name}"
             except RuntimeError:
                 raise
             except Exception as exc:
@@ -612,7 +610,7 @@ async def _check_fake_tls_mtproto_target(
     target: ProxyTarget,
     secret: bytes,
     timeout: float,
-) -> None:
+) -> str:
     errors: list[str] = []
     transport_candidates = [
         (
@@ -665,7 +663,7 @@ async def _check_fake_tls_mtproto_target(
                     decoder=decoder,
                     hello_style=hello_style,
                 )
-                return
+                return f"faketls {hello_style} dc{dc_id}/{transport_name}"
             except RuntimeError:
                 raise
             except Exception as exc:
@@ -930,7 +928,7 @@ async def _check_socks5(
     await _check_direct_mtproto_req_pq(reader, writer, timeout)
 
 
-async def _check_socks5_target(target: ProxyTarget, timeout: float) -> None:
+async def _check_socks5_target(target: ProxyTarget, timeout: float) -> str:
     errors: list[str] = []
     for dc_host, dc_port in TELEGRAM_DCS:
         reader = None
@@ -948,7 +946,7 @@ async def _check_socks5_target(target: ProxyTarget, timeout: float) -> None:
                 dc_host=dc_host,
                 dc_port=dc_port,
             )
-            return
+            return f"socks5->{dc_host}:{dc_port}"
         except Exception as exc:
             errors.append(f"{dc_host}:{dc_port}: {type(exc).__name__}")
         finally:

@@ -1,7 +1,8 @@
+import asyncio
 import unittest
 
 from mtproto_checker.info import collect_proxy_info
-from mtproto_checker import ProxyStatus, parse_proxy_url
+from mtproto_checker import ProxyStatus, check_proxy, parse_proxy_url
 
 
 class ParseProxyUrlTests(unittest.TestCase):
@@ -38,7 +39,7 @@ class ParseProxyUrlTests(unittest.TestCase):
     def test_status_values_are_strings(self):
         self.assertEqual(ProxyStatus.LIVE.value, "live")
 
-    def test_info_decodes_fake_tls_secret_and_marks_exact_sponsor_unavailable(self):
+    def test_info_decodes_fake_tls_secret(self):
         info = collect_proxy_info(
             "tg://proxy?server=109.120.191.135&port=853&secret=7t16ej1vTPH3w_rpz_KLc3lhZHMueDUucnU",
             include_ipwhois=False,
@@ -46,10 +47,26 @@ class ParseProxyUrlTests(unittest.TestCase):
 
         self.assertEqual(info["secret"]["mode"], "fake_tls")
         self.assertEqual(info["secret"]["domain"], "ads.x5.ru")
-        self.assertTrue(info["sponsor"]["detected"])
-        self.assertFalse(
-            info["sponsor"]["exact"]["available_without_telegram_user_session"]
-        )
+        self.assertEqual(set(info), {"target", "canonical", "secret"})
+
+
+class CheckProxyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tcp_live_result_includes_probe_name(self):
+        async def handle_client(reader, writer):
+            await reader.read(8)
+            await asyncio.sleep(0.6)
+            writer.close()
+
+        server = await asyncio.start_server(handle_client, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            result = await check_proxy(f"127.0.0.1:{port}", timeout=2, attempts=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        self.assertEqual(result.status, ProxyStatus.LIVE)
+        self.assertEqual(result.probe, "tcp")
 
 
 if __name__ == "__main__":

@@ -35,11 +35,12 @@ async def check_proxy(
     successes = 0
     last_error: str | None = None
     successful_latency_ms: float | None = None
+    successful_probe: str | None = None
 
     for attempt_index in range(attempts):
         attempt_started = time.perf_counter()
         try:
-            await _check_target_once(target, timeout)
+            successful_probe = await _check_target_once(target, timeout)
             successes += 1
             successful_latency_ms = (time.perf_counter() - attempt_started) * 1000
             if successes >= min_successes:
@@ -50,6 +51,7 @@ async def check_proxy(
                     status=ProxyStatus.LIVE,
                     latency_ms=round(successful_latency_ms, 1),
                     error=None,
+                    probe=successful_probe,
                     attempts=attempt_index + 1,
                     successes=successes,
                 )

@@ -28,6 +28,7 @@ class CheckResult:
     status: ProxyStatus
     latency_ms: float | None
     error: str | None = None
+    probe: str | None = None
     attempts: int = 1
     successes: int = 0
 

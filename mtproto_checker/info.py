@@ -22,7 +22,6 @@ def collect_proxy_info(
         "target": asdict(target),
         "canonical": _canonical_url(target),
         "secret": _secret_info(target),
-        "sponsor": _sponsor_info(target),
     }
 
     if include_ipwhois:
@@ -90,102 +89,6 @@ def _secret_info(target: ProxyTarget) -> dict[str, Any]:
         "embedded_text": embedded_text,
         "hex": secret.hex(),
     }
-
-
-def _sponsor_info(target: ProxyTarget) -> dict[str, Any]:
-    parsed = urllib.parse.urlparse(target.raw_url)
-    params = urllib.parse.parse_qs(parsed.query)
-
-    explicit_keys = ("sponsor", "channel", "title")
-    explicit = {
-        key: values[0]
-        for key in explicit_keys
-        if (values := params.get(key))
-    }
-
-    secret = _secret_info(target)
-    domain = secret.get("domain") or secret.get("embedded_text")
-
-    evidence = []
-    confidence = "unknown"
-    detected: bool | None = None
-
-    if explicit.get("sponsor") or explicit.get("channel"):
-        detected = True
-        confidence = "high"
-        evidence.append("URL contains sponsor/channel field")
-    if explicit.get("title"):
-        evidence.append("URL contains title field")
-
-    if domain:
-        evidence.append(f"secret embeds domain/SNI: {domain}")
-        if _looks_like_ad_domain(str(domain)):
-            detected = True
-            confidence = "medium" if confidence == "unknown" else confidence
-            evidence.append("secret domain looks promotional/ad-related")
-        elif detected is None:
-            detected = False
-            confidence = "low"
-
-    if detected is None:
-        evidence.append("public proxy URL does not expose sponsor metadata")
-
-    return {
-        "detected": detected,
-        "confidence": confidence,
-        "source": "passive_url_secret_analysis",
-        "exact": _exact_sponsor_capability(),
-        "explicit_fields": explicit,
-        "secret_domain_hint": domain,
-        "evidence": evidence,
-        "note": (
-            "Telegram MTProxy sponsor channel is not reliably encoded in public proxy URLs. "
-            "Without a Telegram user session this is a passive heuristic, not proof."
-        ),
-    }
-
-
-def _exact_sponsor_capability() -> dict[str, Any]:
-    return {
-        "available_without_telegram_user_session": False,
-        "can_tell_presence_without_telegram_user_session": False,
-        "telegram_methods": [
-            {
-                "name": "help.getPromoData",
-                "current": True,
-                "result": "help.promoData with proxy+peer flags when an MTProxy sponsor exists",
-                "limitation": "official schema marks the method as user-only",
-            },
-            {
-                "name": "help.getProxyData",
-                "current": False,
-                "result": "legacy help.proxyDataPromo/help.proxyDataEmpty",
-                "limitation": "legacy API layer, still depends on Telegram knowing the proxy context",
-            },
-        ],
-        "reason": (
-            "The promoted peer is resolved by Telegram servers for a client session connected "
-            "through a registered MTProxy. The proxy URL/secret only gives server, port, key, "
-            "and optional FakeTLS domain; it does not carry the sponsored channel ID."
-        ),
-    }
-
-
-def _looks_like_ad_domain(domain: str) -> bool:
-    lowered = domain.lower()
-    tokens = (
-        "ad",
-        "ads",
-        "sponsor",
-        "promo",
-        "proxy",
-        "mtproxy",
-        "mt-proxy",
-        "channel",
-        "tg",
-        "telegram",
-    )
-    return any(token in lowered for token in tokens)
 
 
 def _ipwhois(host: str, *, timeout: float) -> dict[str, Any]:
