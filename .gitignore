@@ -1,0 +1,7 @@
+/mtproto-checker
+/dist/
+*.exe
+*.test
+*.out
+results.json
+live.txt
