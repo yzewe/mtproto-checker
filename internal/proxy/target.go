@@ -14,9 +14,10 @@ import (
 type Kind string
 
 const (
-	KindMTProto Kind = "mtproto"
-	KindSocks5  Kind = "socks5"
-	KindTCP     Kind = "tcp"
+	KindMTProto  Kind = "mtproto"
+	KindSocks5   Kind = "socks5"
+	KindWebProxy Kind = "webproxy"
+	KindTCP      Kind = "tcp"
 )
 
 type SecretMode string
@@ -65,6 +66,9 @@ func (t *Target) Canonical() string {
 	case KindMTProto:
 		params = append(params, "secret="+url.QueryEscape(t.Secret))
 		return "tg://proxy?" + strings.Join(params, "&")
+	case KindWebProxy:
+		return "tg://webproxy?server=" + url.QueryEscape(t.Host) +
+			"&secret=" + url.QueryEscape(t.Secret)
 	case KindSocks5:
 		if t.Username != "" {
 			params = append(params, "user="+url.QueryEscape(t.Username))
@@ -145,6 +149,8 @@ func fromURL(raw string, u *url.URL) (*Target, error) {
 	switch {
 	case path == "socks" || strings.HasPrefix(scheme, "socks"):
 		t.Kind = KindSocks5
+	case path == "webproxy":
+		t.Kind = KindWebProxy
 	case t.Secret != "":
 		t.Kind = KindMTProto
 	default:
@@ -153,6 +159,10 @@ func fromURL(raw string, u *url.URL) (*Target, error) {
 
 	if host == "" {
 		return nil, errors.New("missing server")
+	}
+	// A WEB proxy is always reached over HTTPS on the standard port.
+	if t.Kind == KindWebProxy && portText == "" {
+		portText = "443"
 	}
 	port, err := parsePort(portText)
 	if err != nil {
@@ -179,7 +189,7 @@ func fromHostPort(s string) (*Target, error) {
 }
 
 func finish(t *Target) (*Target, error) {
-	if t.Kind != KindMTProto {
+	if t.Kind != KindMTProto && t.Kind != KindWebProxy {
 		return t, nil
 	}
 	secret, err := DecodeSecret(t.Secret)

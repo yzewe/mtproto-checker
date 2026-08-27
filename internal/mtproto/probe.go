@@ -227,6 +227,8 @@ func New(timeout time.Duration) *Checker {
 
 func (c *Checker) Probe(ctx context.Context, t *proxy.Target) (Outcome, error) {
 	switch t.Kind {
+	case proxy.KindWebProxy:
+		return c.probeWebProxy(ctx, t)
 	case proxy.KindSocks5:
 		return c.probeSocks5(ctx, t)
 	case proxy.KindMTProto:
@@ -440,6 +442,10 @@ func (c *Checker) fakeTLSHandshake(conn net.Conn, t *proxy.Target) error {
 }
 
 func (c *Checker) handshake(conn net.Conn, carrier io.ReadWriter, secretKey []byte, cand candidate) (stageResults, error) {
+	deadlines := carrier
+	if conn != nil {
+		deadlines = conn
+	}
 	var out stageResults
 
 	obf, err := newObfConn(carrier, secretKey, cand.tr.tag, cand.dc)
@@ -447,7 +453,7 @@ func (c *Checker) handshake(conn net.Conn, carrier io.ReadWriter, secretKey []by
 		return out, fail(StageProtocol, err)
 	}
 
-	s := &stream{w: obf, r: obf, tr: cand.tr, deadline: deadlineSetter(conn), perStep: c.Timeout}
+	s := &stream{w: obf, r: obf, tr: cand.tr, deadline: deadlineSetter(deadlines), perStep: c.Timeout}
 	if c.depth() == DepthQuick {
 		if err := quickCheck(s); err != nil {
 			return out, fail(StageProtocol, err)
@@ -503,11 +509,19 @@ func (c *Checker) fullHandshake(s *stream, dcID int) (stageResults, error) {
 	return out, nil
 }
 
-func deadlineSetter(conn net.Conn) func(time.Time) {
-	if conn == nil {
+// deadlineSetter adapts whatever carries the stream to the deadline hook. A
+// WEB proxy carrier is not a net.Conn but bounds its requests the same way.
+func deadlineSetter(carrier io.ReadWriter) func(time.Time) {
+	switch c := carrier.(type) {
+	case nil:
+		return nil
+	case interface{ SetDeadline(time.Time) error }:
+		return func(t time.Time) { _ = c.SetDeadline(t) }
+	case interface{ SetDeadline(time.Time) }:
+		return c.SetDeadline
+	default:
 		return nil
 	}
-	return func(t time.Time) { _ = conn.SetDeadline(t) }
 }
 
 func summarize(problems []string, keep int) string {

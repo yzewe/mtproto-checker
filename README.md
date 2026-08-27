@@ -1,12 +1,12 @@
 # mtproto-checker
 
-Чекер Telegram-прокси на Go: MTProto, FakeTLS и SOCKS5. Без зависимостей, один бинарник, всё асинхронно.
+Чекер Telegram-прокси на Go: MTProto, FakeTLS, WEB-прокси и SOCKS5. Без зависимостей, один бинарник, всё асинхронно.
 
 ## Что умеет
 
-- MTProto (`plain`, `dd`/secure, `ee`/FakeTLS) и SOCKS5;
+- MTProto (`plain`, `dd`/secure, `ee`/FakeTLS), WEB-прокси и SOCKS5;
 - два режима проверки: быстрый `resPQ` и полный клиентский handshake (`--full`);
-- ссылки `tg://proxy`, `https://t.me/proxy`, `t.me/socks`, `socks5://`, а также `host:port`;
+- ссылки `tg://proxy`, `tg://webproxy`, `https://t.me/proxy`, `t.me/socks`, `socks5://`, а также `host:port`;
 - источники: аргументы, файлы, stdin, HTTP(S)-подписки (`--url`) — ссылки вытаскиваются даже из HTML и постов канала;
 - дедупликация одинаковых прокси, повторы (`--attempts`), строгий режим (`--min-successes`);
 - оценка качества: буква A–D и очки по задержке, джиттеру и потерям;
@@ -79,6 +79,31 @@ mtproto-checker --file proxies.txt --attempts 3 --min-successes 2 --info
 mtproto-checker --file proxies.txt --format links --alive-only --quiet --save-links live.txt
 cat proxies.txt | mtproto-checker --stdin --format json > results.json
 ```
+
+## WEB-прокси
+
+`tg://webproxy?server=H&secret=...` — транспорт из
+[tproxy-server](https://github.com/telegramdesktop/tproxy-server): поток MTProxy
+едет мультиплексированными кадрами поверх HTTPS или WebSocket на 443 порту.
+
+```bash
+mtproto-checker "tg://webproxy?server=proxy.example.com&secret=00112233445566778899aabbccddeeff"
+```
+
+Чекер повторяет клиентскую последовательность целиком: выводит bridge-способность
+как `HMAC-SHA256(secret, "tdesktop-web-proxy-bridge-v1\n" + host)`, забирает
+одноразовый bootstrap-токен со страницы моста, создаёт релей-сессию через
+`HELLO`/`WELCOME`, открывает поток и гоняет по нему обычное обфусцированное
+рукопожатие MTProto. Поэтому `--full`, `--inspect`, `--speedtest` и `--hold`
+работают через WEB-прокси так же, как через обычный.
+
+Поддержаны все четыре режима переносчика: `https`, `https-lanes`, `websocket`,
+`websocket-lanes` — режим выбирает сам сервер, чекер показывает его в маршруте
+(`webproxy -> websocket`). Неверный секрет виден сразу: мост не отдаёт
+bootstrap-токен, результат помечается кодом `secret_rejected`.
+
+WebSocket-переносчик заметно быстрее: на одном и том же хосте 1846 КБ/с против
+956 КБ/с у последовательного HTTPS — у того потолок в один запрос за раз.
 
 ## Глубокие проверки
 
@@ -167,6 +192,7 @@ best: 192.0.2.10:4443 🇳🇱 NL  49.1 ms  grade A
 
 ```text
 tg://proxy?server=192.0.2.10&port=443&secret=ee...
+tg://webproxy?server=proxy.example.com&secret=00112233445566778899aabbccddeeff
 https://t.me/proxy?server=192.0.2.11&port=443&secret=dd...
 https://t.me/socks?server=192.0.2.12&port=1080&user=name&pass=secret
 socks5://name:secret@192.0.2.12:1080
@@ -197,7 +223,7 @@ socks5://name:secret@192.0.2.12:1080
 --max-conns   сколько параллельных подключений открыть
 --retry-delay пауза перед второй попыткой, дальше экспоненциально (250ms)
 --info        секрет, домен FakeTLS и гео через ipwho.is
---mode        оставить только fake_tls, secure, plain, socks5 или tcp
+--mode        оставить только fake_tls, secure, plain, webproxy, socks5 или tcp
 --port        оставить только эти порты
 --country     оставить только эти страны (включает --info)
 --asn         оставить только эти автономные системы (включает --info)
@@ -223,6 +249,7 @@ socks5://name:secret@192.0.2.12:1080
 cmd/mtproto-checker    точка входа и разбор флагов
 internal/input         сбор ссылок из аргументов, файлов, stdin и подписок
 internal/proxy         разбор ссылок и секретов (dd, ee, hex, base64)
+internal/webproxy      WEB-прокси: мост, релей-сессия, кадры, HTTPS и WebSocket
 internal/mtproto       транспорт и протокол: обфускация, FakeTLS, SOCKS5,
                        RSA_PAD, AES-IGE, Diffie-Hellman, auth key, ping,
                        вызовы API и проверки прокси
