@@ -14,7 +14,7 @@ import (
 	"github.com/yzewe/mtproto-checker/internal/proxy"
 )
 
-var linkPattern = regexp.MustCompile(`(?i)\b(?:tg://(?:proxy|socks)|(?:https?://)?(?:t\.me|telegram\.me)/(?:proxy|socks)|socks5://)[^\s"'<>]+`)
+var linkPattern = regexp.MustCompile(`(?i)\b(?:tg://(?:webproxy|proxy|socks)|(?:https?://)?(?:t\.me|telegram\.me)/(?:webproxy|proxy|socks)|socks5://)[^\s"'<>]+`)
 
 type Sources struct {
 	Args  []string
